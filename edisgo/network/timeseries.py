@@ -6,6 +6,7 @@ import os
 
 from workalendar.europe import Germany
 from demandlib import bdew as bdew, particular_profiles as profiles
+
 from edisgo.io.timeseries_import import import_feedin_timeseries
 from edisgo.tools.tools import assign_voltage_level_to_component,\
     drop_duplicated_columns, get_weather_cells_intersecting_with_grid_district
@@ -424,9 +425,7 @@ class TimeSeries:
             setattr(
                 self,
                 attr,
-                getattr(self, attr).apply(
-                    lambda _: _.astype(to_type)
-                )
+                getattr(self, attr).astype(to_type)
             )
 
     def to_csv(self, directory, reduce_memory=False, **kwargs):
@@ -471,7 +470,8 @@ class TimeSeries:
                     os.path.join(directory, "{}.csv".format(attr))
                 )
 
-    def from_csv(self, directory):
+    def from_csv(
+            self, directory, dtype=None):
         """
         Restores time series from csv files.
 
@@ -485,22 +485,38 @@ class TimeSeries:
 
         """
         timeindex = None
+
         for attr in _get_attributes_to_save():
             path = os.path.join(
                 directory,
                 '{}.csv'.format(attr)
             )
             if os.path.exists(path):
-                setattr(
-                    self,
-                    attr,
-                    pd.read_csv(path, index_col=0, parse_dates=True)
-                )
+                if dtype is None:
+                    setattr(
+                        self,
+                        attr,
+                        pd.read_csv(path, index_col=0, parse_dates=True)
+                    )
+                else:
+                    df = pd.read_csv(
+                        path, index_col=0, parse_dates=True, nrows=0)
+
+                    dtypes = {col: dtype for col in df.columns}
+
+                    setattr(
+                        self,
+                        attr,
+                        pd.read_csv(
+                            path, index_col=0, parse_dates=True, dtype=dtypes)
+                    )
+
                 if timeindex is None:
                     timeindex = getattr(
                         self,
                         "_{}".format(attr)
                     ).index
+
         if timeindex is None:
             timeindex = pd.DatetimeIndex([])
         self._timeindex = timeindex
@@ -597,6 +613,7 @@ def get_component_timeseries(edisgo_obj, **kwargs):
         ranges of the given time series that will be used in the analysis.
 
     """
+
     mode = kwargs.get("mode", None)
     timeindex = kwargs.get("timeindex", edisgo_obj.timeseries.timeindex)
     # reset TimeSeries
