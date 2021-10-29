@@ -1,8 +1,9 @@
 import logging
 import numpy as np
 import pandas as pd
+import math
 
-from edisgo import EDisGo
+from edisgo import EDisGo, edisgo
 
 COLUMNS = {
     "integrated_charging_parks_df": ["edisgo_id"],
@@ -54,9 +55,10 @@ def integrate_charging_points(edisgo_obj, comp_type="ChargingPoint"):
 # TODO: the dummy timeseries should be as long as the simulated days and not the timeindex of the edisgo object
 # At the moment this would result into wrong results if the timeindex of the edisgo object is
 # not continuously (e.g. 2 weeks of the year)
-# TODO: the chargingdemand for strategy reduced is 10% less as for the others
 def charging_strategy(
-        edisgo_obj, strategy="dumb", timestamp_share_threshold=0.2, minimum_charging_capacity_factor=0.1):
+        edisgo_obj, strategy="dumb", reactive_power_strategy=None,
+        timestamp_share_threshold=0.2, minimum_charging_capacity_factor=0.1,
+        **kwargs):
     """
     Calculates the timeseries per charging park if parking times are given.
 
@@ -319,3 +321,140 @@ def charging_strategy(
         raise ValueError(f"Strategy {strategy} has not yet been implemented.")
 
     logging.info(f"Charging strategy {strategy} completed.")
+    """
+    3 reactive power charging strategies fixed_cos, cos phi(P), Q(U)
+    
+    This function provide reactive power compensation based on the voltage 
+    information of the bus where inverter is connected,
+    for this purpose the droop for reactive power calculation is divided 
+    in to 5 different reactive power calculation zones. 
+    Returned value is the curve_q_set_in_percentage.
+    Parameters for Q_U curve optimized for BEV are included, but can be changed
+    curve source: Netzstabilität mit Elektromobilität
+    """
+    def q_u_curve(v_res,
+                  curve_parameter={"end_upper": 1.1, "start_upper": 1.05,
+                                   "start_lower": 0.95, "end_lower": 0.9,
+                                   "max_value": 1, "dead-band_value": 0,
+                                   "min_value": -1}):
+
+        curve_q_set_in_percentage = np.select(
+            [(v_res > curve_parameter["end_upper"]),
+             (v_res <= curve_parameter["end_upper"]) &
+             (v_res >= curve_parameter["start_upper"]),
+             (v_res < curve_parameter["start_upper"]) &
+             (v_res >= curve_parameter["start_lower"]),
+             (v_res < curve_parameter["start_lower"]) &
+             (v_res >= curve_parameter["end_lower"]),
+             (v_res < curve_parameter["end_lower"])],
+            [curve_parameter["max_value"],
+             curve_parameter["max_value"] - curve_parameter["max_value"] /
+             (curve_parameter["start_upper"] - curve_parameter["end_upper"]) *
+             (v_res - curve_parameter["end_upper"]),
+             curve_parameter["dead-band_value"],
+             curve_parameter["min_value"] *
+             (v_res - curve_parameter["start_lower"]) /
+             (curve_parameter["end_lower"] - curve_parameter["start_lower"]),
+             curve_parameter["min_value"]])
+
+        return curve_q_set_in_percentage
+
+    # fixed_cos sets cos_phi to a fixed value depending on the Grid Lvl
+    if reactive_power_strategy == "apply_fixed_cos_phi":
+
+        # Set cos_phi depending on the Grid lvl
+        # Default 0.95 for LV and 0.9 for MV
+        lv_cos_phi = kwargs.get("lv_cos_phi", 0.95)
+        mv_cos_phi = kwargs.get("mv_cos_phi", 0.9)
+
+        # Selecting all buses with an charging point
+        cp_buses_df = edisgo_obj.topology.charging_points_df
+
+        buses_df = edisgo_obj.topology.buses_df.loc[cp_buses_df.bus]
+
+        # This Dataframe merges all buses with charging points incl. v_nom
+        cp_voltage_lvl_df = cp_buses_df.merge(
+            buses_df.v_nom, how="left", left_on="bus", right_index=True)
+
+        # df for all lv charging points
+        lv_cps = cp_voltage_lvl_df.loc[cp_voltage_lvl_df.v_nom < 1].index
+
+        # Calculating reactive power for lv df
+        edisgo_obj.timeseries._charging_points_reactive_power.loc[
+         :, lv_cps] = edisgo_obj.timeseries.charging_points_active_power.loc[
+                      :, lv_cps] * math.tan(math.acos(lv_cos_phi))
+
+        # df for all mv charging points
+        mv_cps = cp_voltage_lvl_df.loc[cp_voltage_lvl_df.v_nom >= 1].index
+
+        # Calculating reactive power for mv df
+        edisgo_obj.timeseries._charging_points_reactive_power.loc[
+        :, mv_cps] = edisgo_obj.timeseries.charging_points_active_power.loc[
+                     :, mv_cps] * math.tan(math.acos(mv_cos_phi))
+
+    # Calculating the reactive power as a function of the grid voltage(U)
+    if reactive_power_strategy == "apply_q_u":
+
+        # Getting the voltage of all buses with charging points
+        bev_buses = edisgo_obj.topology.charging_points_df.bus
+        v_res = edisgo_obj.results.v_res.loc[:, bev_buses]
+
+        # calculation of maximum q compensation in % based on Q_U_curve
+        q_set_in_percentage = q_u_curve(v_res)
+
+        # Set cos_phi depending on the Grid lvl
+        # Default 0.95 for LV and 0.9 for MV
+        lv_cos_phi = kwargs.get("lv_cos_phi", 0.95)
+        mv_cos_phi = kwargs.get("mv_cos_phi", 0.9)
+
+        # Selecting all buses with an charging point
+        cp_buses_df = edisgo_obj.topology.charging_points_df
+
+        buses_df = edisgo_obj.topology.buses_df.loc[cp_buses_df.bus]
+
+        # This Dataframe merges all buses with charging points incl. v_nom
+        cp_voltage_lvl_df = cp_buses_df.merge(
+         buses_df.v_nom, how="left", left_on="bus", right_index=True)
+
+        # df for all lv charging points
+        lv_cps = cp_voltage_lvl_df.loc[cp_voltage_lvl_df.v_nom < 1].index
+
+        # Calculating reactive power for lv df
+        edisgo_obj.timeseries._charging_points_reactive_power.loc[
+         :, lv_cps] = edisgo_obj.timeseries.charging_points_active_power.loc[
+            :, lv_cps] * math.tan(math.acos(lv_cos_phi)) * q_set_in_percentage
+
+        # df for all mv charging points
+        mv_cps = cp_voltage_lvl_df.loc[cp_voltage_lvl_df.v_nom >= 1].index
+
+        # Calculating reactive power for mv df
+        edisgo_obj.timeseries._charging_points_reactive_power.loc[
+           :, mv_cps] = edisgo_obj.timeseries.charging_points_active_power.loc[
+            :, mv_cps] * math.tan(math.acos(mv_cos_phi)) * q_set_in_percentage
+
+
+        """
+        calculation of maximum q compensation in % based on bus v_res
+        calculation of q based on the "curve_q_set_in_percentage" output
+        q_out = (((curve_q_set_in_percentage * q_allowable) / 100) * params[
+        'damper'] * params['sign'])
+
+        cos_phi_P muss in den einzelnen Ladestrategien implementiert werden, 
+        da hier die Padeleistung der einzelnen Ladepunkte relevant ist.
+        Alternativ in eine Funktion deklarieren.
+        curve_parameter = [1.1, 1.05, 0.95, 0.9]
+        curve_q_set_in_percentage = np.select(
+            [(v_res > curve_parameter[0]),
+             (v_res <= curve_parameter[0]) & (v_res >= curve_parameter[1]),
+             (v_res < curve_parameter[1]) & (v_res >= curve_parameter[2]),
+             (v_res < curve_parameter[2]) & (v_res >= curve_parameter[3]),
+             (v_res < curve_parameter[3])],
+            [100,
+             100 - 100 / (curve_parameter[1] - curve_parameter[0]) *
+                         (v_res - curve_parameter[0]),
+             0,
+             -100 * (v_res - curve_parameter[2]) /
+                    (curve_parameter[3] - curve_parameter[2]),
+             -100])
+    
+        """
