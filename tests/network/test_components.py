@@ -2,11 +2,12 @@ import pytest
 import pandas as pd
 
 from edisgo import EDisGo
-from edisgo.network.components import Load, Generator, Storage, Switch
+from edisgo.network.components import Load, Generator, Storage, Switch, PotentialChargingParks
 
 
 class TestComponents:
-    #ToDo add tests for storages_df
+    # ToDo add tests for storages_df
+    # ToDo add tests for PotentialChargingParks
 
     @classmethod
     def setup_class(self):
@@ -52,7 +53,7 @@ class TestComponents:
         """Test Generator class getter, setter, methods"""
 
         gen = Generator(id='GeneratorFluctuating_7', edisgo_obj=self.edisgo_obj)
-        #GeneratorFluctuating_7,Bus_GeneratorFluctuating_7,PQ,3,wind,1122075,wind_wind_onshore
+        # GeneratorFluctuating_7,Bus_GeneratorFluctuating_7,PQ,3,wind,1122075,wind_wind_onshore
         # test getter
         assert gen.id == 'GeneratorFluctuating_7'
         assert gen.bus == 'Bus_GeneratorFluctuating_7'

@@ -4,6 +4,9 @@ import logging
 from math import acos, tan
 from abc import ABC, abstractmethod
 
+from edisgo.tools.geo import find_nearest_bus
+from edisgo.io.electromobility_import import determine_grid_connection_capacity
+
 if "READTHEDOCS" not in os.environ:
     from shapely.geometry import Point
 
@@ -498,8 +501,8 @@ class Generator(Component):
 
         """
         return self.edisgo_obj.timeseries.generators_active_power.loc[
-            :, self.id
-        ]
+               :, self.id
+               ]
 
     @property
     def reactive_power_timeseries(self):
@@ -513,8 +516,8 @@ class Generator(Component):
 
         """
         return self.edisgo_obj.timeseries.generators_reactive_power.loc[
-            :, self.id
-        ]
+               :, self.id
+               ]
 
     @property
     def weather_cell_id(self):
@@ -629,13 +632,13 @@ class Storage(Component):
             return self._timeseries
         else:
             self._timeseries["q"] = (
-                abs(self._timeseries.p)
-                * self.q_sign
-                * tan(acos(self.power_factor))
+                    abs(self._timeseries.p)
+                    * self.q_sign
+                    * tan(acos(self.power_factor))
             )
             return self._timeseries.loc[
-                self.grid.edisgo_obj.timeseries.timeindex, :
-            ]
+                   self.grid.edisgo_obj.timeseries.timeindex, :
+                   ]
 
     @property
     def nominal_power(self):
@@ -1152,3 +1155,208 @@ class Switch(BasicComponent):
 #     @quantity.setter
 #     def quantity(self, new_quantity):
 #         self._quantity = new_quantity
+
+class PotentialChargingParks(BasicComponent):
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    @property
+    def voltage_level(self):
+        """
+        Voltage level the component is connected to ('mv' or 'lv').
+
+        Returns
+        --------
+        :obj:`str`
+            Voltage level. Returns 'lv' if component connected to the low
+            voltage and 'mv' if component is connected to the medium voltage.
+
+        """
+        try:
+            return "lv" if self.grid.nominal_voltage < 1 else "mv"
+        except:
+            return None
+
+    @property
+    def grid(self):
+        """
+        Grid component is in.
+
+        Returns
+        --------
+        :class:`~.network.components.Grid`
+            Grid component is in.
+
+        """
+        try:
+            bus = self.topology.charging_points_df.at[self.edisgo_id, "bus"]
+            lv_grid_id = self.topology.buses_df.at[bus, "lv_grid_id"]
+            if math.isnan(lv_grid_id):
+                return self.topology.mv_grid
+            else:
+                return self.topology._grids[
+                    "LVGrid_{}".format(int(lv_grid_id))
+                ]
+        except:
+            return None
+
+    @property
+    def ags(self):
+        """
+            8-digit AGS (Amtlicher Gemeindeschlüssel, eng. Community Identification Number)
+            number the potential charging park is in. Number is given as :obj:`int` and
+            leading zeros are therefore missing.
+
+            Returns
+            --------
+            :obj:`int`
+                AGS number
+
+        """
+        return self._edisgo_obj.electromobility.grid_connections_gdf.at[self._id, "ags"]
+
+    @property
+    def use_case(self):
+        """
+            Charging use case (home, work, public or hpc) of the potential charging park.
+
+            Returns
+            --------
+            :obj:`str`
+                Charging use case
+
+        """
+        return self._edisgo_obj.electromobility.grid_connections_gdf.at[self._id, "use_case"]
+
+    @property
+    def designated_charging_point_capacity(self):
+        """
+            Total gross designated charging park capacity.
+            This is not necessarily equal to the connection rating.
+
+            Returns
+            --------
+            :obj:`float`
+                Total gross designated charging park capacity
+
+        """
+        return round(self._edisgo_obj.electromobility.charging_processes_df.loc[
+                         self._edisgo_obj.electromobility.charging_processes_df.grid_connection_point_id == self._id
+                         ].drop_duplicates(subset=["car_id"]).netto_charging_capacity.sum() / \
+                     self._edisgo_obj.electromobility.eta_charging_points, 1)
+
+    @property
+    def user_centric_weight(self):
+        """
+            User centric weight of the potential charging park
+            determined by `SimBEV <https://github.com/rl-institut/simbev>`_.
+
+            Returns
+            --------
+            :obj:`float`
+                User centric weight
+
+        """
+        return self._edisgo_obj.electromobility.grid_connections_gdf.at[self._id, "user_centric_weight"]
+
+    @property
+    def geometry(self):
+        """
+            Location of the potential charging park as :shapely:`Shapely Point object<points>`.
+
+            Returns
+            --------
+            :shapely:`Shapely Point object<points>`.
+                Location of the potential charging park
+
+        """
+        return self._edisgo_obj.electromobility.grid_connections_gdf.at[self._id, "geometry"]
+
+    @property
+    def nearest_substation(self):
+        """
+            Determines the nearest LV Grid, substation and distance.
+
+            Returns
+            --------
+            :obj:`dict`
+                :obj:`int`
+                    LV Grid ID
+                :obj:`str`
+                    ID of the nearest substation
+                :obj:`float`
+                    Distance to nearest substation
+
+        """
+        substations = self._topology.buses_df.loc[
+            self._topology.transformers_df.bus1]
+
+        nearest_substation, distance = find_nearest_bus(self.geometry, substations)
+
+        lv_grid_id = int(self._topology.buses_df.at[nearest_substation, "lv_grid_id"])
+
+        return {"lv_grid_id": lv_grid_id, "nearest_substation": nearest_substation, "distance": distance}
+
+    @property
+    def edisgo_id(self):
+        try:
+            return self._edisgo_obj.electromobility.integrated_charging_parks_df.at[self.id, "edisgo_id"]
+        except:
+            return None
+
+    @property
+    def charging_processes_df(self):
+        """
+            Determines designated charging processes for the potential charging park.
+
+            Returns
+            --------
+            :pandas:`pandas.DataFrame<DataFrame>`
+                DataFrame with AGS, car ID, trip destination, charging use case (private or public),
+                netto charging capacity, charging demand, charge start, charge end, grid connection point and
+                charging point ID.
+
+        """
+        return self._edisgo_obj.electromobility.charging_processes_df.loc[
+            self._edisgo_obj.electromobility.charging_processes_df.grid_connection_point_id == self._id
+            ]
+
+    @property
+    def grid_connection_capacity(self):
+        return determine_grid_connection_capacity(self.designated_charging_point_capacity / 10 ** 3)
+
+    @property
+    def _last_charging_process_and_netto_charging_capacity_per_charging_point(self):
+        return self.charging_processes_df[
+            ["charging_point_id", "park_end", "netto_charging_capacity"]
+        ].groupby(by="charging_point_id").max()
+
+    @property
+    def _load_and_generator_capacity_weight(self, **kwargs):
+        """
+        Determines grid centric weight regarding load and generator capacity in LV Grid.
+
+        Returns
+        --------
+        :obj:`float`
+            Grid centric weight regarding load and generator capacity in LV Grid
+
+        """
+        generators_weight_factor = kwargs.get("generators_weight_factor", 1 / 2)
+        loads_weight_factor = kwargs.get("loads_weight_factor", 1 / 2)
+
+        weights = (loads_weight_factor, generators_weight_factor)
+
+        if not round(sum(weights), 3) == 1:
+            f = 1 / sum(weights)
+            generators_weight_factor *= f
+            loads_weight_factor *= f
+
+        generators_weight_value = self._topology.lv_grids_df.at[
+            self.nearest_substation["lv_grid_id"], "generators_weight"]
+
+        loads_weight_value = self._topology.lv_grids_df.at[
+            self.nearest_substation["lv_grid_id"], "loads_weight"]
+
+        return generators_weight_value * generators_weight_factor + loads_weight_value * loads_weight_factor

@@ -4,12 +4,14 @@ import pandas as pd
 import pickle
 
 from edisgo.network.topology import Topology
+from edisgo.network.electromobility import Electromobility
 from edisgo.network.results import Results
 from edisgo.network import timeseries
 from edisgo.io import pypsa_io
 from edisgo.tools import plots, tools
 from edisgo.flex_opt.reinforce_grid import reinforce_grid
 from edisgo.io.ding0_import import import_ding0_grid
+from edisgo.io.electromobility_import import import_simbev_electromobility
 from edisgo.io.generators_import import oedb as import_generators_oedb
 from edisgo.tools.config import Config
 from edisgo.tools.geo import find_nearest_bus
@@ -253,6 +255,10 @@ class EDisGo:
         self.topology = Topology(config=self.config)
         self.import_ding0_grid(path=kwargs.get("ding0_grid", None))
 
+        # instantiate electromobility object and load charging processes and sites
+        self.electromobility = Electromobility(edisgo_obj=self)
+        self.import_simbev_electromobility(path=kwargs.get("simbev_data", None))
+
         # set up results and time series container
         self.results = Results(self)
         self.opf_results = OPFResults()
@@ -308,6 +314,11 @@ class EDisGo:
         """
         if path is not None:
             import_ding0_grid(path, self)
+
+    def import_simbev_electromobility(self, path):
+
+        if path is not None:
+            import_simbev_electromobility(path, self)
 
     def to_pypsa(self, **kwargs):
         """
@@ -583,7 +594,7 @@ class EDisGo:
 
         """
         # aggregate generators at the same bus
-        if mode is "by_component_type" or "by_load_and_generation":
+        if mode == "by_component_type" or mode == "by_load_and_generation":
             if not self.topology.generators_df.empty:
                 gens_groupby = self.topology.generators_df.groupby(
                     aggregate_generators_by_cols)
@@ -631,7 +642,7 @@ class EDisGo:
 
         # aggregate conventional loads at the same bus and charging points
         # at the same bus separately
-        if mode is "by_component_type":
+        if mode == "by_component_type":
 
             # conventional loads
             if not self.topology.loads_df.empty:
@@ -718,7 +729,7 @@ class EDisGo:
 
         # aggregate all loads (conventional loads and charging points) at the
         # same bus
-        elif mode is "by_load_and_generation":
+        elif mode == "by_load_and_generation":
             aggregate_loads_by_cols = ["bus"]
             loads_groupby = pd.concat(
                 [self.topology.loads_df.loc[:, ["bus", "peak_load"]],

@@ -5,6 +5,7 @@ import numpy as np
 import os
 import warnings
 import networkx as nx
+from sklearn import preprocessing
 
 import edisgo
 from edisgo.network.grids import MVGrid, LVGrid
@@ -40,7 +41,10 @@ COLUMNS = {
 
     ],
     "buses_df": ["v_nom", "x", "y", "mv_grid_id", "lv_grid_id", "in_building"],
-    "switches_df": ["bus_open", "bus_closed", "branch", "type_info"]
+    "switches_df": ["bus_open", "bus_closed", "branch", "type_info"],
+    "lv_grids_df": ["peak_generation_capacity", "peak_load", "installed_charging_point_capacity",
+                    "substation_capacity", "generators_weight", "loads_weight",
+                    "installed_charging_point_weight"],
 }
 
 
@@ -304,10 +308,10 @@ class Topology:
 
             use_case : str
               Specifies if charging point is e.g. for charging at
-              home, at work, in public, or public fast charging. Used in
+              home, at work, in public or HPC. Used in
               charging point integration (:attr:`~.EDisGo.integrate_component`)
               to determine possible grid connection points, in which case use
-              cases 'home', 'work', 'public', and 'fast' are distinguished.
+              cases 'home', 'work', 'public', and 'hpc' are distinguished.
 
         Returns
         --------
@@ -545,6 +549,10 @@ class Topology:
         # make sure in_building takes on only True or False (not numpy bools)
         # needs to be tested using `== True`, not `is True`
         buses_in_building = df[df.in_building == True].index
+
+        # silences pandas SettingWithCopyWarning
+        df = df.copy()
+
         df.loc[buses_in_building, "in_building"] = True
         df.loc[
             ~df.index.isin(buses_in_building), "in_building"] = False
@@ -638,6 +646,42 @@ class Topology:
     @mv_grid.setter
     def mv_grid(self, mv_grid):
         self._mv_grid = mv_grid
+
+    @property
+    def lv_grids_df(self):
+        lv_grids_df = pd.DataFrame(index=[_._id for _ in self.mv_grid.lv_grids], columns=COLUMNS["lv_grids_df"])
+
+        lv_grids = list(self.mv_grid.lv_grids)
+
+        lv_grids_df.peak_generation_capacity = [_.peak_generation_capacity for _ in lv_grids]
+
+        lv_grids_df.peak_load = [_.peak_load for _ in lv_grids]
+
+        lv_grids_df.installed_charging_point_capacity = [_.charging_points_df.p_nom.sum() for _ in lv_grids]
+
+        lv_grids_df.substation_capacity = [_.transformers_df.s_nom.sum() for _ in lv_grids]
+
+        min_max_scaler = preprocessing.MinMaxScaler()
+
+        lv_grids_df.generators_weight = lv_grids_df.peak_generation_capacity.divide(
+            lv_grids_df.substation_capacity)
+
+        lv_grids_df.generators_weight = min_max_scaler.fit_transform(
+            lv_grids_df.generators_weight.values.reshape(-1, 1))
+
+        lv_grids_df.loads_weight = lv_grids_df.peak_load.divide(
+            lv_grids_df.substation_capacity)
+
+        lv_grids_df.loads_weight = 1 - min_max_scaler.fit_transform(
+            lv_grids_df.loads_weight.values.reshape(-1, 1))
+
+        lv_grids_df.installed_charging_point_weight = lv_grids_df.installed_charging_point_capacity.divide(
+            lv_grids_df.substation_capacity)
+
+        lv_grids_df.installed_charging_point_weight = 1 - min_max_scaler.fit_transform(
+            lv_grids_df.installed_charging_point_weight.values.reshape(-1, 1))
+
+        return lv_grids_df
 
     @property
     def grid_district(self):
@@ -1135,7 +1179,7 @@ class Topology:
             data,
             name=name,
         ).to_frame().T
-        self.charging_points_df = self.charging_points_df.append(new_df)
+        self.charging_points_df = self.charging_points_df.append(new_df, sort=True)
         return name
 
     def add_storage_unit(self, bus, p_nom, control="PQ", **kwargs):
@@ -1871,7 +1915,7 @@ class Topology:
                   residential, if available
                 * with use case 'work' to LV loads of type
                   retail, industrial or agricultural, if available, otherwise
-                * with use case 'public' or 'fast' to some bus in the grid that
+                * with use case 'public' or 'hpc' to some bus in the grid that
                   is not a house connection
                 * to random bus in the LV grid that
                   is not a house connection if no appropriate load is available
@@ -2098,15 +2142,27 @@ class Topology:
                     ]
                     target_buses = tmp.bus.values
             else:
-                if comp_data["use_case"] is "home":
-                    tmp = lv_loads[lv_loads.sector == "residential"]
+                warning = "Sector declaration for LV loads is missing. "\
+                           "Using any LV loads as fallback to determine "\
+                           f"grid connection for {comp_type}."
+
+                if comp_data["use_case"] == "home":
+                    try:
+                        tmp = lv_loads[lv_loads.sector == "residential"]
+                    except:
+                        logging.warning(warning)
+                        tmp = lv_loads.copy()
                     target_buses = tmp.bus.values
-                elif comp_data["use_case"] is "work":
-                    tmp = lv_loads[
-                        lv_loads.sector.isin(
-                            ["industrial", "agricultural", "retail"]
-                        )
-                    ]
+                elif comp_data["use_case"] == "work":
+                    try:
+                        tmp = lv_loads[
+                            lv_loads.sector.isin(
+                                ["industrial", "agricultural", "retail"]
+                            )
+                        ]
+                    except:
+                        logging.warning(warning)
+                        tmp = lv_loads.copy()
                     target_buses = tmp.bus.values
                 else:
                     target_buses = lv_grid.buses_df[
