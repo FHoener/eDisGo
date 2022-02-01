@@ -1,9 +1,11 @@
 import logging
 import math
 
+
 import numpy as np
 import pandas as pd
 from edisgo.flex_opt.charging_strategies import harmonize_charging_processes_df
+from edisgo.network.timeseries import _get_q_sign_generator, _get_q_sign_load
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -201,11 +203,11 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
 """
     if for_gen:
         # Selecting all buses with an charging point
-        gen_buses_df = edisgo_obj.topology.generators_df.loc[(edisgo_obj.topology.generators_df.type == "solar") | (edisgo_obj.topology.generators_df.type == "wind")]
+        gen_buses_df = edisgo_obj.topology.generators_df.loc[edisgo_obj.topology.generators_df.type.isin(["solar", "wind"])]
         buses_with_gen = edisgo_obj.topology.buses_df.loc[gen_buses_df.bus]
 
         # This Dataframe merges all buses with charging points incl. v_nom
-        gen_and_v_nom_df = edisgo_obj.topology.generators_df.loc[(edisgo_obj.topology.generators_df.type == "solar") | (edisgo_obj.topology.generators_df.type == "wind")].merge(edisgo_obj.topology.buses_df.v_nom, how="left", left_on="bus", right_index=True)
+        gen_and_v_nom_df = edisgo_obj.topology.generators_df.loc[edisgo_obj.topology.generators_df.type.isin(["solar", "wind"])].merge(edisgo_obj.topology.buses_df.v_nom, how="left", left_on="bus", right_index=True)
 
         # df for all lv charging points
         gen_in_lv = gen_and_v_nom_df.loc[
@@ -246,34 +248,35 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
 
         if for_cp:
             # Calculating reactive power for lv df
-            edisgo_obj.timeseries.charging_points_reactive_power.loc[
-            :, cp_in_lv
+            edisgo_obj.timeseries._charging_points_reactive_power.loc[
+            :, cp_in_lv.index
             ] = edisgo_obj.timeseries.charging_points_active_power.loc[
                 :, cp_in_lv.index
-                ] * lv_cos_phi
+                ] * lv_cos_phi * _get_q_sign_load("inductive")
 
             # Calculating reactive power for mv df
             edisgo_obj.timeseries.charging_points_reactive_power.loc[
             :, cp_in_mv
             ] = edisgo_obj.timeseries.charging_points_active_power.loc[
-                :, cp_in_mv
-                ] * mv_cos_phi
+                :, cp_in_mv.index
+                ] * mv_cos_phi * _get_q_sign_load("inductive")
 
         # calculating reactive power for generators
         if for_gen:
             # Calculating reactive power for lv df
-            edisgo_obj.timeseries.generators_reactive_power.loc[
+            edisgo_obj.timeseries._generators_reactive_power.loc[
             :, gen_in_lv.index
             ] = edisgo_obj.timeseries.generators_active_power.loc[
                 :, gen_in_lv.index
-                ] * lv_cos_phi
+                ] * lv_cos_phi * _get_q_sign_generator("inductive")
 
             # Calculating reactive power for mv df
-            edisgo_obj.timeseries.generators_reactive_power.loc[
+            edisgo_obj.timeseries._generators_reactive_power.loc[
             :, gen_in_mv.index
             ] = edisgo_obj.timeseries.generators_active_power.loc[
                 :, gen_in_mv.index
-                ] * mv_cos_phi
+                ] * mv_cos_phi * _get_q_sign_generator("inductive")
+
 
 
     # Calculating the reactive power as a function of the grid voltage(U)
@@ -363,23 +366,25 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
         """
         if strategy == "cos_phi_p":
             # Getting the maximum charging capacity of the charging point
+            # TO-DO: cp und gn df für funktion in größe der timeseries übergeben
+            #        für netto_cap p_nm nehmen
+            if for_cp:
 
-            netto_charging_capacity = (
-                edisgo_obj.electromobility.charging_processes_df.loc[
-                :, "netto_charging_capacity"
-                ]
-            )
+                netto_charging_capacity = (
+                    edisgo_obj.topology.charging_points_df.loc[
+                    :, "p_nom"
+                    ])
 
-            used_charging_capacity = (
-                edisgo_obj.electromobility.charging_processes_df.loc[
-                :, "netto_charging_capacity"
-                ]
-            )
+                used_charging_capacity = (
+                    edisgo_obj.electromobility.charging_processes_df.loc[
+                    :, "netto_charging_capacity"
+                    ]
+                )
 
-            # calculation of q compensation in % based on cos_phi_p_curve
-            q_fac_in_percentage = cos_phi_p_curve(
-                netto_charging_capacity, used_charging_capacity
-            )
+                # calculation of q compensation in % based on cos_phi_p_curve
+                q_fac_in_percentage = cos_phi_p_curve(
+                    netto_charging_capacity, used_charging_capacity
+                )
             # Changing variable in df for calculation
             """q_fac_in_percentage = pd.DataFrame(
                                 q_fac_in_percentage,
@@ -393,18 +398,14 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
                 :, cp_in_lv
                 ] = edisgo_obj.timeseries.charging_points_active_power.loc[
                     :, cp_in_lv
-                    ] * math.tan(
-                    math.acos(lv_cos_phi)
-                )
+                    ] * lv_cos_phi
 
                 # Calculating reactive power for mv df
                 edisgo_obj.timeseries.charging_points_reactive_power.loc[
                 :, cp_in_mv
                 ] = edisgo_obj.timeseries.charging_points_active_power.loc[
                     :, cp_in_mv
-                    ] * math.tan(
-                    math.acos(mv_cos_phi)
-                )
+                    ] * mv_cos_phi
 
             # calculating reactive power for generators
             if for_gen:
@@ -413,16 +414,13 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
                 :, gen_in_lv
                 ] = edisgo_obj.timeseries.generators_active_power.loc[
                     :, gen_in_lv
-                    ] * math.tan(
-                    math.acos(lv_cos_phi)
-                )
+                    ] * lv_cos_phi
 
                 # Calculating reactive power for mv df
                 edisgo_obj.timeseries.generators_reactive_power.loc[
                 :, gen_in_mv
                 ] = edisgo_obj.timeseries.generators_active_power.loc[
                     :, gen_in_mv
-                    ] * math.tan(
-                    math.acos(mv_cos_phi)
-                )
+                    ] * mv_cos_phi
+
     logger.info(f"Reactive charging strategy {strategy} completed.")
