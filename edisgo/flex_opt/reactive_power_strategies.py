@@ -150,12 +150,12 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
     if for_cp:
         # Selecting all buses with an charging point
         cp_buses_df = edisgo_obj.topology.charging_points_df.copy()
-        buses_with_cp = edisgo_obj.topology.buses_df.loc[cp_buses_df.bus]
+        buses_with_cp = edisgo_obj.topology.buses_df.loc[cp_buses_df.bus.unique()]
 
         # This Dataframe merges all buses with charging points incl. v_nom
         cp_and_v_nom_df = cp_buses_df.merge(
-            buses_with_cp.v_nom, how="left", left_on="bus", right_index=True
-        )
+            buses_with_cp.v_nom, how="left", left_on="bus", right_index=True)
+
         # df for all lv charging points
         cp_in_lv = cp_and_v_nom_df.loc[
             cp_and_v_nom_df.v_nom < 1].bus
@@ -204,7 +204,7 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
     if for_gen:
         # Selecting all buses with an charging point
         gen_buses_df = edisgo_obj.topology.generators_df.loc[edisgo_obj.topology.generators_df.type.isin(["solar", "wind"])]
-        buses_with_gen = edisgo_obj.topology.buses_df.loc[gen_buses_df.bus]
+        buses_with_gen = edisgo_obj.topology.buses_df.loc[gen_buses_df.bus.unique()]
 
         # This Dataframe merges all buses with charging points incl. v_nom
         gen_and_v_nom_df = edisgo_obj.topology.generators_df.loc[edisgo_obj.topology.generators_df.type.isin(["solar", "wind"])].merge(edisgo_obj.topology.buses_df.v_nom, how="left", left_on="bus", right_index=True)
@@ -216,7 +216,6 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
         # df for all mv charging points
         gen_in_mv = gen_and_v_nom_df.loc[
             gen_and_v_nom_df.v_nom >= 1].bus
-
         # replacing active power with p_nom for q_u
         gen_p_nom_per_timestep = edisgo_obj.timeseries.generators_active_power.loc[:, gen_buses_df.index].copy()
         gen_transformed = edisgo_obj.topology.generators_df.T
@@ -228,15 +227,15 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
     if for_gen and for_cp:
         buses = cp_buses_df.bus.append(
             gen_buses_df.bus).unique()
-        buses_to_calculate = edisgo_obj.topology.buses_df.loc[buses, :].copy()
+        buses_to_calculate = edisgo_obj.topology.buses_df.loc[buses, :]
 
     elif for_gen:
 
-        buses_to_calculate = buses_with_gen.copy()
+        buses_to_calculate = buses_with_gen.unique()
 
     elif for_cp:
 
-        buses_to_calculate = buses_with_cp.copy()
+        buses_to_calculate = buses_with_cp.unique()
 
     else:
 
@@ -256,7 +255,7 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
 
             # Calculating reactive power for mv df
             edisgo_obj.timeseries.charging_points_reactive_power.loc[
-            :, cp_in_mv
+            :, cp_in_mv.index
             ] = edisgo_obj.timeseries.charging_points_active_power.loc[
                 :, cp_in_mv.index
                 ] * mv_cos_phi * _get_q_sign_load("inductive")
