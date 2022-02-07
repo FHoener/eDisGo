@@ -139,7 +139,7 @@ class Electromobility:
         try:
             return int(self.simbev_config_df.at["stepsize", "value"])
         except:
-            return None
+            return 15
 
     @property
     def simulated_days(self):
@@ -155,7 +155,7 @@ class Electromobility:
         try:
             return int(self.simbev_config_df.at["days", "value"])
         except:
-            return None
+            return 371
 
     @property
     def eta_charging_points(self):
@@ -171,7 +171,7 @@ class Electromobility:
         try:
             return float(self.simbev_config_df.at["eta_CP", "value"])
         except:
-            return None
+            return 0.9
 
     def to_csv(self, directory):
         """
