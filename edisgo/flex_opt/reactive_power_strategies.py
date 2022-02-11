@@ -259,7 +259,8 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
     # Calculating the reactive power as a function of the grid voltage(U)
     if strategy == "q_u":
 
-        # Get df with timeseries and p_nom per charging point and generator
+        # Filling v_res df
+        edisgo_obj.analyze()
 
         # iteration of the powerflow
         for n_trials in range(max_trails):
