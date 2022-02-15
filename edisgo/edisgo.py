@@ -493,6 +493,9 @@ class EDisGo:
 
         pypsa_network = self.to_pypsa(mode=mode, timesteps=timesteps, **kwargs)
 
+        lpf = kwargs.get("lpf", False)
+        if lpf:
+            pf_results = pypsa_network.lpf(timesteps)
         # run power flow analysis
         pf_results = pypsa_network.pf(
             timesteps, use_seed=kwargs.get("use_seed", False))

@@ -258,9 +258,9 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
 
     # Calculating the reactive power as a function of the grid voltage(U)
     if strategy == "q_u":
-
+        # try with linear powerflow for convergence problems
         # Filling v_res df
-        edisgo_obj.analyze()
+        edisgo_obj.analyze(lpf=True)
 
         # iteration of the powerflow
         for n_trials in range(max_trails):
@@ -373,60 +373,56 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
         (dadurch identisch zu fix cos phi)
         TO_DO: Convertierung zum Dataframe aus fct anpassen
         """
-        if strategy == "cos_phi_p":
+    if strategy == "cos_phi_p":
 
-            if for_cp:
-                netto_charging_capacity = cp_p_nom_per_timestep
-                used_charging_capacity = edisgo_obj.timeseries.charging_points_active_power
+        if for_cp:
+            netto_charging_capacity = cp_p_nom_per_timestep
+            used_charging_capacity = edisgo_obj.timeseries.charging_points_active_power
 
-                # calculation of q compensation in % based on cos_phi_p_curve
-                cp_cos_phi_p = cos_phi_p_curve(
-                    netto_charging_capacity, used_charging_capacity
-                )
+            # calculation of q compensation in % based on cos_phi_p_curve
+            cp_cos_phi_p = pd.DataFrame(cos_phi_p_curve(netto_charging_capacity, used_charging_capacity), index=used_charging_capacity.index, columns=used_charging_capacity.columns)
+            # Calculating reactive power for lv df
+            edisgo_obj.timeseries._charging_points_reactive_power.loc[
+            :, cp_in_lv.index] \
+                = edisgo_obj.timeseries.charging_points_active_power.loc[
+                    :, cp_in_lv.index] \
+                    * lv_cos_phi \
+                    * cp_cos_phi_p.loc[:, cp_in_lv.index] \
+                    * _get_q_sign_load("inductive")
 
-                # Calculating reactive power for lv df
-                edisgo_obj.timeseries._charging_points_reactive_power.loc[
-                :, cp_in_lv.index] \
-                    = edisgo_obj.timeseries.charging_points_active_power.loc[
-                      :, cp_in_lv.index] \
-                      * lv_cos_phi \
-                      * cp_cos_phi_p.loc[:, cp_in_lv.index] \
-                      * _get_q_sign_load("inductive")
-
-                # Calculating reactive power for mv df
-                edisgo_obj.timeseries._charging_points_reactive_power.loc[
+            # Calculating reactive power for mv df
+            edisgo_obj.timeseries._charging_points_reactive_power.loc[
                 :, cp_in_mv.index] \
-                    = edisgo_obj.timeseries.charging_points_active_power.loc[
-                      :, cp_in_mv.index] \
-                      * mv_cos_phi \
-                      * cp_cos_phi_p.loc[:, cp_in_mv.index] \
-                      * _get_q_sign_load("inductive")
+                = edisgo_obj.timeseries.charging_points_active_power.loc[
+                :, cp_in_mv.index] \
+                * mv_cos_phi \
+                * cp_cos_phi_p.loc[:, cp_in_mv.index] \
+                * _get_q_sign_load("inductive")
 
-            # calculating reactive power for generators
-            if for_gen:
-                netto_charging_capacity = gen_p_nom_per_timestep
-                used_charging_capacity = edisgo_obj.timeseries.generators_active_power
+                # calculating reactive power for generators
+        if for_gen:
+            netto_charging_capacity = gen_p_nom_per_timestep
+            used_charging_capacity = edisgo_obj.timeseries.generators_active_power
 
-                # calculation of q compensation in % based on cos_phi_p_curve
-                gen_cos_phi_p = cos_phi_p_curve(
-                    netto_charging_capacity, used_charging_capacity
-                )
-                # Calculating reactive power for lv df
-                edisgo_obj.timeseries._generators_reactive_power.loc[
+            # calculation of q compensation in % based on cos_phi_p_curve
+            gen_cos_phi_p = pd.DataFrame(cos_phi_p_curve(netto_charging_capacity, used_charging_capacity), index=used_charging_capacity.index, columns=used_charging_capacity.columns)
+
+            # Calculating reactive power for lv df
+            edisgo_obj.timeseries._generators_reactive_power.loc[
                 :, gen_in_lv.index] \
-                    = edisgo_obj.timeseries.generators_active_power.loc[
-                      :, gen_in_lv.index] \
-                      * lv_cos_phi \
-                      * gen_cos_phi_p.loc[:, gen_in_lv.index] \
-                      * _get_q_sign_generator("inductive")
+                = edisgo_obj.timeseries.generators_active_power.loc[
+                    :, gen_in_lv.index] \
+                    * lv_cos_phi \
+                    * gen_cos_phi_p.loc[:, gen_in_lv.index] \
+                    * _get_q_sign_generator("inductive")
 
-                # Calculating reactive power for mv df
-                edisgo_obj.timeseries._generators_reactive_power.loc[
+            # Calculating reactive power for mv df
+            edisgo_obj.timeseries._generators_reactive_power.loc[
                 :, gen_in_mv.index] \
-                    = edisgo_obj.timeseries.generators_active_power.loc[
-                      :, gen_in_mv.index] \
-                      * mv_cos_phi \
-                      * gen_cos_phi_p.loc[:, gen_in_mv.index] \
-                      * _get_q_sign_generator("inductive")
+                = edisgo_obj.timeseries.generators_active_power.loc[
+                    :, gen_in_mv.index] \
+                    * mv_cos_phi \
+                    * gen_cos_phi_p.loc[:, gen_in_mv.index] \
+                    * _get_q_sign_generator("inductive")
 
     logger.info(f"Reactive charging strategy {strategy} completed.")
