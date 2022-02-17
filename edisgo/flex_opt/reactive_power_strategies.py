@@ -3,8 +3,8 @@ import math
 
 import numpy as np
 import pandas as pd
-from edisgo.flex_opt.charging_strategies import harmonize_charging_processes_df
 from edisgo.network.timeseries import _get_q_sign_generator, _get_q_sign_load
+from edisgo.io import pypsa_io
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -27,6 +27,24 @@ logger.addHandler(file_handler)
     curve source: Netzstabilität mit Elektromobilität
 """
 
+# splits df in mv and lv
+def get_mv_and_lv_grid_df(bus_df, to_split_df):
+
+    buses_to_split = bus_df.loc[to_split_df.bus.unique()]
+
+    # This Dataframe merges all buses with charging points incl. v_nom
+    to_split_with_v_nom_df = to_split_df.merge(
+        buses_to_split.v_nom, how="left", left_on="bus", right_index=True)
+
+    # df for all lv charging points
+    lv_df = to_split_with_v_nom_df.loc[
+        to_split_with_v_nom_df.v_nom < 1].bus
+
+    # df for all mv charging points
+    mv_df = to_split_with_v_nom_df.loc[
+        to_split_with_v_nom_df.v_nom >= 1].bus
+
+    return lv_df, mv_df
 
 def q_u_curve(
         v_res,
@@ -129,19 +147,21 @@ def cos_phi_p_curve(
 """
 
 
-def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
-                              for_gen=False, max_trails=10, **kwargs):
+def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
+
     # Default 0.95 for LV and 0.9 for MV
     lv = kwargs.get("lv_cos_phi", 0.95)
     mv = kwargs.get("mv_cos_phi", 0.9)
     mv_cos_phi = math.tan(math.acos(mv))
     lv_cos_phi = math.tan(math.acos(lv))
 
-    # max trails or iteration of q_u default 10
-    # max_trails = kwargs.get("max_trails", 10)
+    # bool for charging points and generator,
+    # false skips reactive strategy for either of those
+    for_cp = kwargs.get("charging_points", True)
+    for_gen = kwargs.get("generator", True)
 
-    # timesteps for q_u iteration default NONE
-    timesteps = kwargs.get("timesteps", None)
+    # max trails or iteration of q_u default 10
+    max_trails = kwargs.get("max_trails", 10)
 
     # THRESHOLD for ending iteration of q_u by matching v_res default 5
     THRESHOLD = kwargs.get("THRESHOLD", 5)
@@ -152,20 +172,9 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
     if for_cp:
         # Selecting all buses with an charging point
         cp_buses_df = edisgo_obj.topology.charging_points_df.copy()
-        buses_with_cp = edisgo_obj.topology.buses_df.loc[
-            cp_buses_df.bus.unique()]
+        buses_for_cp = edisgo_obj.topology.buses_df
 
-        # This Dataframe merges all buses with charging points incl. v_nom
-        cp_and_v_nom_df = cp_buses_df.merge(
-            buses_with_cp.v_nom, how="left", left_on="bus", right_index=True)
-
-        # df for all lv charging points
-        cp_in_lv = cp_and_v_nom_df.loc[
-            cp_and_v_nom_df.v_nom < 1].bus
-
-        # df for all mv charging points
-        cp_in_mv = cp_and_v_nom_df.loc[
-            cp_and_v_nom_df.v_nom >= 1].bus
+        cp_in_lv, cp_in_mv = get_mv_and_lv_grid_df(buses_for_cp, cp_buses_df)
 
         # replacing active power with p_nom for q_u
         cp_p_nom_per_timestep = edisgo_obj.timeseries.charging_points_active_power.copy()
@@ -178,23 +187,10 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
         # Selecting all buses with an charging point
         gen_buses_df = edisgo_obj.topology.generators_df.loc[
             edisgo_obj.topology.generators_df.type.isin(["solar", "wind"])]
-        buses_with_gen = edisgo_obj.topology.buses_df.loc[
-            gen_buses_df.bus.unique()]
+        buses_for_gen = edisgo_obj.topology.buses_df
 
-        # This Dataframe merges all buses with charging points incl. v_nom
-        gen_and_v_nom_df = edisgo_obj.topology.generators_df.loc[
-            edisgo_obj.topology.generators_df.type.isin(
-                ["solar", "wind"])].merge(edisgo_obj.topology.buses_df.v_nom,
-                                          how="left", left_on="bus",
-                                          right_index=True)
+        gen_in_lv, gen_in_mv = get_mv_and_lv_grid_df(buses_for_gen, gen_buses_df)
 
-        # df for all lv charging points
-        gen_in_lv = gen_and_v_nom_df.loc[
-            gen_and_v_nom_df.v_nom < 1].bus
-
-        # df for all mv charging points
-        gen_in_mv = gen_and_v_nom_df.loc[
-            gen_and_v_nom_df.v_nom >= 1].bus
         # replacing active power with p_nom for q_u
         gen_p_nom_per_timestep = edisgo_obj.timeseries.generators_active_power.loc[
                                  :, gen_buses_df.index].copy()
@@ -211,11 +207,11 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
 
     elif for_gen:
 
-        buses_to_calculate = buses_with_gen.unique()
+        buses_to_calculate = buses_for_gen.unique()
 
     elif for_cp:
 
-        buses_to_calculate = buses_with_cp.unique()
+        buses_to_calculate = buses_for_cp.unique()
 
     else:
 
@@ -258,9 +254,34 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
 
     # Calculating the reactive power as a function of the grid voltage(U)
     if strategy == "q_u":
+
         # try with linear powerflow for convergence problems
         # Filling v_res df
-        edisgo_obj.analyze(lpf=True)
+        pypsa_network = edisgo_obj.to_pypsa()
+
+        pypsa_network.lpf(edisgo_obj.timeseries.timeindex)
+        pf_results = pypsa_network.pf(
+            edisgo_obj.timeseries.timeindex, use_seed=True)
+
+        timesteps_converged = pf_results["converged"][
+            pf_results["converged"]["0"]].index
+        pypsa_io.process_pfa_results(
+            edisgo_obj, pypsa_network, timesteps_converged, dtype="float32")
+
+        # Setting reactive power on not converged timesteps to 0
+
+        timesteps_not_converged = edisgo_obj.timeseries.timeindex.copy()
+        mask = edisgo_obj.timeseries._charging_points_reactive_power.index.isin(
+            timesteps_converged)
+        timesteps_not_converged = timesteps_not_converged[~mask]
+
+        logger.info(f"Skipping q_u at {len(timesteps_not_converged)} timesteps.")
+        if for_cp:
+            edisgo_obj.timeseries._charging_points_reactive_power.loc[
+                timesteps_not_converged, :] = 0
+        if for_gen:
+            edisgo_obj.timeseries._generators_reactive_power.loc[
+                timesteps_not_converged, :] = 0
 
         # iteration of the powerflow
         for n_trials in range(max_trails):
@@ -279,76 +300,57 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", for_cp=False,
                 q_fac = q_fac_old + Q_U_STEP * (
                         q_fac_in_percentage - q_fac_old)
 
-            # TO-DO: auf p_nom
             if for_cp:
-                # Getting q_fac for cp
-                # groups = cp_buses_df.groupby("bus").groups
 
-                # q_fac_per_cp = {}
-
-                # for bus, cps in groups.items():
-                #    for cp in cps:
-                #        q_fac_per_cp.update({cp: q_fac.loc[:, bus]})
-
-                # cp_fac_df = pd.DataFrame.from_dict(q_fac_per_cp)
+                # Getting q_fac per cp
                 groups = cp_buses_df.groupby("bus").groups
                 cp_fac_df = pd.concat(
                     [pd.DataFrame({v: q_fac.loc[:, k] for v in groups[k]})
                      for k in groups.keys()], axis=1, )
 
                 # Calculating reactive power for lv df
-                edisgo_obj.timeseries._charging_points_reactive_power.loc[:,
+                edisgo_obj.timeseries._charging_points_reactive_power.loc[timesteps_converged,
                 cp_in_lv.index] \
-                    = cp_p_nom_per_timestep.loc[:, cp_in_lv.index] \
+                    = cp_p_nom_per_timestep.loc[timesteps_converged, cp_in_lv.index] \
                       * lv_cos_phi \
-                      * cp_fac_df.loc[:, cp_in_lv.index] \
+                      * cp_fac_df.loc[timesteps_converged, cp_in_lv.index] \
                       * _get_q_sign_load("inductive")
 
                 # Calculating reactive power for mv df
                 edisgo_obj.timeseries._charging_points_reactive_power.loc[
-                :, cp_in_mv.index
-                ] = cp_p_nom_per_timestep.loc[:, cp_in_mv.index] \
+                timesteps_converged, cp_in_mv.index
+                ] = cp_p_nom_per_timestep.loc[timesteps_converged, cp_in_mv.index] \
                     * mv_cos_phi \
-                    * cp_fac_df.loc[:, cp_in_mv.index] \
+                    * cp_fac_df.loc[timesteps_converged, cp_in_mv.index] \
                     * _get_q_sign_load("inductive")
 
             # calculating reactive power for generators
             if for_gen:
 
                 # Getting q_fac per generator
-
-                #groups = gen_buses_df.groupby("bus").groups
-
-                #q_fac_per_gen = {}
-
-                #for bus, gens in groups.items():
-                #    for gen in gens:
-                #        q_fac_per_gen.update({gen: q_fac.loc[:, bus]})
-
-                #gen_fac_df = pd.DataFrame.from_dict(q_fac_per_gen)
                 groups = gen_buses_df.groupby("bus").groups
                 gen_fac_df = pd.concat(
                     [pd.DataFrame({v: q_fac.loc[:, k] for v in groups[k]})
                      for k in groups.keys()], axis=1, )
                 # Calculating reactive power for lv df
-                edisgo_obj.timeseries._generators_reactive_power.loc[:,
+                edisgo_obj.timeseries._generators_reactive_power.loc[timesteps_converged,
                 gen_in_lv.index] \
-                    = gen_p_nom_per_timestep.loc[:, gen_in_lv.index] \
+                    = gen_p_nom_per_timestep.loc[timesteps_converged, gen_in_lv.index] \
                       * lv_cos_phi \
-                      * gen_fac_df.loc[:, gen_in_lv.index] \
+                      * gen_fac_df.loc[timesteps_converged, gen_in_lv.index] \
                       * _get_q_sign_generator("inductive")
 
                 # Calculating reactive power for mv df
                 edisgo_obj.timeseries._generators_reactive_power.loc[
-                :, gen_in_mv.index] \
-                    = gen_p_nom_per_timestep.loc[:, gen_in_mv.index] \
+                timesteps_converged, gen_in_mv.index] \
+                    = gen_p_nom_per_timestep.loc[timesteps_converged, gen_in_mv.index] \
                       * mv_cos_phi \
-                      * gen_fac_df.loc[:, gen_in_mv.index] \
+                      * gen_fac_df.loc[timesteps_converged, gen_in_mv.index] \
                       * _get_q_sign_generator("inductive")
 
-            # falls nicht konvergiert kein Seed verwenden
-            # powerflow at timestep (None by default)
-            edisgo_obj.analyze(use_seed=True, timesteps=timesteps)
+            # TO-DO: Hier nur über convergierte Zeitschritte laufen lassen?
+            # powerflow
+            edisgo_obj.analyze(use_seed=True, timesteps=timesteps_converged)
 
             # getting last q_factor for comparison
             q_fac_old = q_fac.copy()
