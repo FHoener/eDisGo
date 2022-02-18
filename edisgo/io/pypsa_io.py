@@ -149,7 +149,7 @@ def to_pypsa(grid_object, timesteps, **kwargs):
                 :, ['bus', 'p_nom']].rename(
                     columns={'p_nom': 'p_set'})),
             "Generator": grid_object.topology.generators_df.loc[
-                :, ["bus", "control", "p_nom"]
+                :, ["bus", "control", "p_nom", "type"]
             ],
             "StorageUnit": grid_object.topology.storage_units_df.loc[
                 :, ["bus", "control"]
@@ -162,7 +162,8 @@ def to_pypsa(grid_object, timesteps, **kwargs):
                 :, ["bus0", "bus1", "x_pu", "r_pu", "type_info", "s_nom"]
             ].rename(columns={"r_pu": "r", "x_pu": "x"}),
         }
-
+        components["Load"].loc[
+            grid_object.topology.charging_points_df.index, "type"] = "charging_point"
     elif "mv" in mode:
 
         pypsa_network.mode = "mv"
@@ -505,7 +506,7 @@ def _get_grid_component_dict(grid_object):
                 columns={'p_nom': 'p_set'})
         ),
         "Generator": grid_object.generators_df.loc[
-                     :, ["bus", "control", "p_nom"]
+                     :, ["bus", "control", "p_nom", "type"]
                      ],
         "StorageUnit": grid_object.storage_units_df.loc[
                        :, ["bus", "control"]
@@ -515,6 +516,8 @@ def _get_grid_component_dict(grid_object):
                 ["bus0", "bus1", "x", "r", "s_nom", "num_parallel", "length"],
                 ],
     }
+    components["Load"].loc[
+        grid_object.charging_points_df.index, "type"] = "charging_point"
     return components
 
 
