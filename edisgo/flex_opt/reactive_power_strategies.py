@@ -271,9 +271,9 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
         # Setting reactive power on not converged timesteps to 0
 
         timesteps_not_converged = edisgo_obj.timeseries.timeindex.copy()
-        mask = edisgo_obj.timeseries._charging_points_reactive_power.index.isin(
+        timesteps_converged_bool = edisgo_obj.timeseries.timeindex.isin(
             timesteps_converged)
-        timesteps_not_converged = timesteps_not_converged[~mask]
+        timesteps_not_converged = timesteps_not_converged[~timesteps_converged_bool]
 
         logger.info(f"Skipping q_u at {len(timesteps_not_converged)} timesteps.")
         if for_cp:
