@@ -33,9 +33,9 @@ def group_q_u_per_df(buses_df, q_fac):
 
     q_fac_per_df = {}
 
-    for bus, group in groups.items():
-        for x in group:
-            q_fac_per_df.update({x: q_fac.loc[:, bus]})
+    for bus, entries in groups.items():
+        for entry in entries:
+            q_fac_per_df.update({entry: q_fac.loc[:, bus]})
 
     return pd.DataFrame.from_dict(q_fac_per_df)
 
@@ -65,12 +65,15 @@ def q_u_curve(
     if curve_parameter is None:
         curve_parameter = {
             "end_upper": 1.1,
-            "start_upper": 1.05,
-            "start_lower": 0.95,
+            "start_upper": 1.03,
+            "start_lower": 0.97,
             "end_lower": 0.9,
             "max_value": 1,
             "min_value": -1,
         }
+    # If NaN values fill with 1
+    v_res.fillna(1)
+
     curve_q_set_in_percentage = np.select(
         [
             (v_res > curve_parameter["end_upper"]),
