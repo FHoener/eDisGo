@@ -288,7 +288,6 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
             edisgo_obj, pypsa_network, timesteps_converged, dtype="float32")
 
         # Setting reactive power on not converged timesteps to 0
-
         timesteps_not_converged = edisgo_obj.timeseries.timeindex.copy()
         timesteps_converged_bool = edisgo_obj.timeseries.timeindex.isin(
             timesteps_converged)
