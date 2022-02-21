@@ -330,7 +330,7 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                     = cp_p_nom_per_timestep.loc[timesteps_converged, cp_in_lv.index] \
                       * lv_cos_phi \
                       * q_u_per_cp_df.loc[timesteps_converged, cp_in_lv.index] \
-                      * _get_q_sign_load("inductive")
+                      #* _get_q_sign_load("inductive")
 
                 # Calculating reactive power for mv df
                 edisgo_obj.timeseries._charging_points_reactive_power.loc[
@@ -338,7 +338,7 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                 ] = cp_p_nom_per_timestep.loc[timesteps_converged, cp_in_mv.index] \
                     * mv_cos_phi \
                     * q_u_per_cp_df.loc[timesteps_converged, cp_in_mv.index] \
-                    * _get_q_sign_load("inductive")
+                    #* _get_q_sign_load("inductive")
 
             # calculating reactive power for generators
             if for_gen:
@@ -355,7 +355,7 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                     = gen_p_nom_per_timestep.loc[timesteps_converged, gen_in_lv.index] \
                       * lv_cos_phi \
                       * q_u_per_gen_df.loc[timesteps_converged, gen_in_lv.index] \
-                      * _get_q_sign_generator("inductive")
+                      #* _get_q_sign_generator("inductive")
 
                 # Calculating reactive power for mv df
                 edisgo_obj.timeseries._generators_reactive_power.loc[
@@ -363,7 +363,7 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                     = gen_p_nom_per_timestep.loc[timesteps_converged, gen_in_mv.index] \
                       * mv_cos_phi \
                       * q_u_per_gen_df.loc[timesteps_converged, gen_in_mv.index] \
-                      * _get_q_sign_generator("inductive")
+                      #* _get_q_sign_generator("inductive")
 
             # TO-DO: Hier nur über convergierte Zeitschritte laufen lassen?
             # powerflow
