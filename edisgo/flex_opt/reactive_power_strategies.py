@@ -58,6 +58,10 @@ def get_mv_and_lv_grid_df(bus_df, to_split_df):
 
     return lv_df, mv_df
 
+# Q_U_Curve for reactive power calculation
+# Input V_res: DataFrame with voltage in p.u.
+# Output: Dataframe with q_u value between 1 and -1.
+# Curve for loads, to use with generators multiply df with -1
 def q_u_curve(
         v_res,
         curve_parameter=None,
@@ -330,7 +334,7 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                     = cp_p_nom_per_timestep.loc[timesteps_converged, cp_in_lv.index] \
                       * lv_cos_phi \
                       * q_u_per_cp_df.loc[timesteps_converged, cp_in_lv.index] \
-                      #* _get_q_sign_load("inductive")
+
 
                 # Calculating reactive power for mv df
                 edisgo_obj.timeseries._charging_points_reactive_power.loc[
@@ -338,24 +342,21 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                 ] = cp_p_nom_per_timestep.loc[timesteps_converged, cp_in_mv.index] \
                     * mv_cos_phi \
                     * q_u_per_cp_df.loc[timesteps_converged, cp_in_mv.index] \
-                    #* _get_q_sign_load("inductive")
+
 
             # calculating reactive power for generators
             if for_gen:
 
                 # Getting q_fac per generator
                 q_u_per_gen_df = group_q_u_per_df(gen_buses_df, q_fac)
-                """groups = gen_buses_df.groupby("bus").groups
-                #gen_fac_df = pd.concat(
-                #    [pd.DataFrame({v: q_fac.loc[:, k] for v in groups[k]})
-                #    for k in groups.keys()], axis=1, )
-                # Calculating reactive power for lv df"""
+
+                # q_u curve used for loads for use with generators multiply with -1
                 edisgo_obj.timeseries._generators_reactive_power.loc[timesteps_converged,
                 gen_in_lv.index] \
                     = gen_p_nom_per_timestep.loc[timesteps_converged, gen_in_lv.index] \
                       * lv_cos_phi \
                       * q_u_per_gen_df.loc[timesteps_converged, gen_in_lv.index] \
-                      #* _get_q_sign_generator("inductive")
+                      * -1
 
                 # Calculating reactive power for mv df
                 edisgo_obj.timeseries._generators_reactive_power.loc[
@@ -363,7 +364,7 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                     = gen_p_nom_per_timestep.loc[timesteps_converged, gen_in_mv.index] \
                       * mv_cos_phi \
                       * q_u_per_gen_df.loc[timesteps_converged, gen_in_mv.index] \
-                      #* _get_q_sign_generator("inductive")
+                      * -1
 
             # TO-DO: Hier nur über convergierte Zeitschritte laufen lassen?
             # powerflow
