@@ -265,12 +265,12 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                 active_power_df = edisgo_obj.timeseries.generators_active_power
                 cap_ind_fac = _get_q_sign_generator("inductive")
 
-        fix_cos_df = active_power_df.loc[:, to_insert_df.index] * cos_phi \
+        fix_cos_df = active_power_df.loc[timesteps_converged, to_insert_df.index] * cos_phi \
                      * cap_ind_fac
 
         # change column order to prevent later mismatching
         columnsTitles = list(fix_cos_df.columns)
-        q_u_df = q_u_df.reindex(columns=columnsTitles)
+        q_u_df = q_u_df.reindex(columns=columnsTitles, )
 
         q_u_df.mask(
             ((q_u_df < 0) & (abs(q_u_df) > abs(fix_cos_df))), fix_cos_df,
