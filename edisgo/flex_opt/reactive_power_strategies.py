@@ -396,6 +396,13 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                 mv_q_fac = mv_q_fac_old + Q_U_STEP * (
                         mv_q_fac - mv_q_fac_old)
 
+            # saving q_fac for next iteration step
+            lv_q_fac_old = lv_q_fac.copy()
+            mv_q_fac_old = mv_q_fac.copy()
+
+            ################
+            #### Loads #####
+            ################
             if for_cp:
 
                 # Getting q_fac per cp
@@ -410,7 +417,8 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
 
                 # Check if reactive_power is lower than fix cos
                 cp_lv_result_df = compare_with_fix_cos_df(edisgo_obj.timeseries.
-                                charging_points_active_power, timesteps_converged,
+                                charging_points_active_power.loc[timesteps_converged,
+                                cp_in_lv.index], timesteps_converged,
                                 cp_lv_result_df, cp_in_mv, lv_cos_phi,
                                 _get_q_sign_load("capacitive"))
 
@@ -421,7 +429,8 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
 
                 # Check if reactive_power is lower than fix cos
                 cp_mv_result_df = compare_with_fix_cos_df(edisgo_obj.timeseries.
-                                charging_points_active_power, timesteps_converged,
+                                charging_points_active_power.loc[timesteps_converged,
+                                cp_in_mv.index], timesteps_converged,
                                 cp_mv_result_df, cp_in_mv, mv_cos_phi,
                                 _get_q_sign_load("capacitive"))
 
@@ -431,7 +440,9 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                 edisgo_obj.timeseries._charging_points_reactive_power.loc[
                     timesteps_converged, cp_in_mv.index] = cp_mv_result_df
 
-            # calculating reactive power for generators
+            ################
+            ## Generators ##
+            ################
             if for_gen:
 
                 # Getting q_fac per generator
@@ -448,7 +459,8 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
 
                 # Check if reactive_power is lower than fix cos
                 gen_lv_result_df = compare_with_fix_cos_df(edisgo_obj.timeseries.
-                                generators_active_power, timesteps_converged,
+                                generators_active_power.loc[timesteps_converged,
+                                gen_in_lv.index], timesteps_converged,
                                 gen_lv_result_df, gen_in_lv, lv_cos_phi,
                                 _get_q_sign_generator("inductive"))
 
@@ -462,7 +474,8 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
 
                 # Check if reactive_power is lower than fix cos
                 gen_mv_result_df = compare_with_fix_cos_df(edisgo_obj.timeseries.
-                                generators_active_power, timesteps_converged,
+                                generators_active_power.loc[timesteps_converged,
+                                gen_in_mv.index], timesteps_converged,
                                 gen_mv_result_df, gen_in_mv, mv_cos_phi,
                                 _get_q_sign_generator("inductive"))
 
@@ -475,11 +488,7 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
             # powerflow
             edisgo_obj.analyze(use_seed=True, timesteps=timesteps_converged)
 
-            # getting last q_factor for comparison
-            lv_q_fac_old = lv_q_fac.copy()
-            mv_q_fac_old = mv_q_fac.copy()
-
-            # Zeitschritte checken
+            # end iteration if changes to volatage are small
             if (v_res.round(THRESHOLD) == edisgo_obj.results.v_res[
                 buses_to_calculate].round(THRESHOLD)).all().all():
                 logger.info(
@@ -493,12 +502,8 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                     logger.info(
                         "Halted Q(U) control after the maximum "
                         f"allowed iterations of {n_trials}.")
-        """
-        fertige Regelung für ladesäulen nicht sinnvoll, da untersuchte 
-        Ladestrategien immer maximale Ladeleistung nutzen 
-        (dadurch identisch zu fix cos phi)
-        TO_DO: Convertierung zum Dataframe aus fct anpassen
-        """
+
+
     if strategy == "cos_phi_p":
 
         if for_cp:
