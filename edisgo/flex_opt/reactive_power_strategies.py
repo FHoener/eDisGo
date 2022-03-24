@@ -16,16 +16,44 @@ file_handler.setFormatter(formatter)
 
 logger.addHandler(file_handler)
 
-"""
-    This function is used for calculating the q_u_curve based on the voltage 
-    information of the bus where inverter is connected,
-    for this purpose the droop for reactive power calculation is divided 
-    in to 5 different reactive power calculation zones. 
-    Returned value is the curve_q_set_in_percentage.
-    Parameters for Q_U curve optimized for BEV are included, but can be changed
-    by specifying the curve_parameter
-    curve source: Netzstabilität mit Elektromobilität
-"""
+
+def compare_with_fix_cos_df(active_power_df, timesteps_converged, q_u_df, to_insert_df, cos_phi,
+                            cap_ind_fac):
+    """
+        Check if Q in Dataframe is smaller than Q(fix_cos_phi)
+        If not replace value with Q(fix_cos_phi)
+
+        Parameters
+        ----------
+        active_power_df : df
+            df for active power, either load or gen
+        q_u_df : df
+            q_u_df to compare with fix_cos_df
+        to_insert_df: df
+            Default: used for column selection on q_u_df
+        cos_phi: float
+            Default: cos_phi factor
+        cap_ind_fac: int
+            vlaue given by _get_q_sign_load or _get_q_sign_generator
+    """
+
+    fix_cos_df = active_power_df.loc[
+                     timesteps_converged, to_insert_df.index] * cos_phi \
+                 * cap_ind_fac
+
+    # change column order to prevent later mismatching
+    columnsTitles = list(fix_cos_df.columns)
+    q_u_df = q_u_df.reindex(columns=columnsTitles, )
+    # TO_DO: optimieren für ind cap fälle'
+    q_u_df.mask(
+        ((q_u_df < 0) & (abs(q_u_df) > abs(fix_cos_df))), abs(fix_cos_df) * -1,
+        inplace=True, axis=1)
+    q_u_df.mask(
+        ((q_u_df >= 0) & (abs(q_u_df) > abs(fix_cos_df))), abs(fix_cos_df),
+        inplace=True, axis=1)
+
+    return q_u_df
+
 
 # changes columns in dataframe from buses to cp or gen
 def group_q_u_per_df(buses_df, q_fac):
@@ -132,7 +160,6 @@ def q_u_curve(
     Output is a float from 0 to 1 which represents 'curve_q_set_in_percentage'
 """
 
-
 def cos_phi_p_curve(
         netto_charging_capacity,
         used_charging_capacity,
@@ -166,7 +193,6 @@ def cos_phi_p_curve(
 
     return curve_q_set_in_percentage
 
-
 """
     3 reactive power strategies
      strategy  = str, fixed_cos_phi, cos_phi_p, q_u
@@ -178,10 +204,9 @@ def cos_phi_p_curve(
      Q_U_STEP  = float, maximum voltage change in one step for q_u iteration        
 """
 
-
 def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
-    """
 
+    """
     Parameters
     ----------
     edisgo_obj : :class:`~.EDisGo`
@@ -190,25 +215,24 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
         Other strategies "q_u" and "cos_phi_p"
     kwargs :
         Kwargs may contain any further attributes you want to specify.
-
-        lv_cos_phi: float
+        lv_cos_phi : float
             Default: 0.95
-         mv_cos_phi: float
+         mv_cos_phi : float
             Default: 0.90
-        for_cp: bool
+        for_cp : bool
             Default: True
             Specifies if reactive strategy is used on charging points
-        for_gen: bool
+        for_gen : bool
             Default: True
             Specifies if reactive strategy is used on generators
-        max_trails: int
+        max_trails : int
             Default: 10
             Max iteration steps for q_u
-        THRESHOLD: int
+        THRESHOLD : int
             Default: 4
             The number of digits after the decimal point where v_res
             needs to match to end the iteration
-        Q_U_STEP: float
+        Q_U_STEP : float
             Default: 0.4
             Steps of change between the iterations for q_u
     """
@@ -226,60 +250,6 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
     THRESHOLD = kwargs.get("THRESHOLD", 4)
 
     Q_U_STEP = kwargs.get("Q_U_STEP", 0.4)
-
-    def compare_with_fix_cos_df(q_u_df, grid_lvl="lv", gen_or_cp="cp"):
-        """
-            Check if Q in Dataframe is smaller than Q(fix_cos_phi)
-            If not replace value with Q(fix_cos_phi)
-
-            Parameters
-            ----------
-            q_u_df : Dataframe
-                q_u_df to compare with fix_cos_df
-            grid_lvl: str
-                Default: lv, other mv
-            gen_or_cp: str
-                Default: cp, other gen
-        """
-
-        if gen_or_cp == "cp":
-            if grid_lvl == "lv":
-                to_insert_df = cp_in_lv
-                cos_phi = lv_cos_phi
-                active_power_df = edisgo_obj.timeseries.charging_points_active_power
-                cap_ind_fac = _get_q_sign_load("capacitive")
-            else:
-                to_insert_df = cp_in_mv
-                cos_phi = mv_cos_phi
-                active_power_df = edisgo_obj.timeseries.charging_points_active_power
-                cap_ind_fac = _get_q_sign_load("capacitive")
-        else:
-            if grid_lvl == "lv":
-                to_insert_df = gen_in_lv
-                cos_phi = lv_cos_phi
-                active_power_df = edisgo_obj.timeseries.generators_active_power
-                cap_ind_fac = _get_q_sign_generator("inductive")
-            else:
-                to_insert_df = gen_in_mv
-                cos_phi = mv_cos_phi
-                active_power_df = edisgo_obj.timeseries.generators_active_power
-                cap_ind_fac = _get_q_sign_generator("inductive")
-
-        fix_cos_df = active_power_df.loc[timesteps_converged, to_insert_df.index] * cos_phi \
-                     * cap_ind_fac
-
-        # change column order to prevent later mismatching
-        columnsTitles = list(fix_cos_df.columns)
-        q_u_df = q_u_df.reindex(columns=columnsTitles, )
-
-        q_u_df.mask(
-            ((q_u_df < 0) & (abs(q_u_df) > abs(fix_cos_df))), fix_cos_df,
-            inplace=True, axis=1)
-        q_u_df.mask(
-            ((q_u_df >= 0) & (abs(q_u_df) > abs(fix_cos_df))), fix_cos_df * -1,
-            inplace=True, axis=1)
-
-        return q_u_df
 
     if for_cp:
         # Selecting all buses with an charging point
@@ -439,11 +409,10 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                     * lv_q_u_per_cp_df.loc[timesteps_converged, cp_in_lv.index]
 
                 # Check if reactive_power is lower than fix cos
-                cp_lv_result_df = compare_with_fix_cos_df(cp_lv_result_df)
-                # Write result
-                edisgo_obj.timeseries._charging_points_reactive_power.loc[timesteps_converged,
-                cp_in_lv.index] = cp_lv_result_df
-
+                cp_lv_result_df = compare_with_fix_cos_df(edisgo_obj.timeseries.
+                                charging_points_active_power, timesteps_converged,
+                                cp_lv_result_df, cp_in_mv, lv_cos_phi,
+                                _get_q_sign_load("capacitive"))
 
                 # Calculating reactive power for mv df
                 cp_mv_result_df = cp_p_nom_per_timestep.loc[timesteps_converged, cp_in_mv.index] \
@@ -451,12 +420,16 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                 * mv_q_u_per_cp_df.loc[timesteps_converged, cp_in_mv.index]
 
                 # Check if reactive_power is lower than fix cos
-                cp_mv_result_df = compare_with_fix_cos_df(cp_mv_result_df,grid_lvl="mv", gen_or_cp="cp")
+                cp_mv_result_df = compare_with_fix_cos_df(edisgo_obj.timeseries.
+                                charging_points_active_power, timesteps_converged,
+                                cp_mv_result_df, cp_in_mv, mv_cos_phi,
+                                _get_q_sign_load("capacitive"))
 
                 # Write result
                 edisgo_obj.timeseries._charging_points_reactive_power.loc[
-                timesteps_converged, cp_in_mv.index] \
-                    = cp_mv_result_df
+                    timesteps_converged, cp_in_lv.index] = cp_lv_result_df
+                edisgo_obj.timeseries._charging_points_reactive_power.loc[
+                    timesteps_converged, cp_in_mv.index] = cp_mv_result_df
 
             # calculating reactive power for generators
             if for_gen:
@@ -474,11 +447,11 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                       * -1
 
                 # Check if reactive_power is lower than fix cos
-                gen_lv_result_df = compare_with_fix_cos_df(gen_lv_result_df,grid_lvl="lv", gen_or_cp="gen")
+                gen_lv_result_df = compare_with_fix_cos_df(edisgo_obj.timeseries.
+                                generators_active_power, timesteps_converged,
+                                gen_lv_result_df, gen_in_lv, lv_cos_phi,
+                                _get_q_sign_generator("inductive"))
 
-                # Write result
-                edisgo_obj.timeseries._generators_reactive_power.loc[
-                    timesteps_converged, gen_in_lv.index] = gen_lv_result_df
 
                 # Calculating reactive power for mv df
                 gen_mv_result_df = gen_p_nom_per_timestep.loc[
@@ -488,9 +461,14 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                       * -1
 
                 # Check if reactive_power is lower than fix cos
-                gen_mv_result_df = compare_with_fix_cos_df(gen_mv_result_df,grid_lvl="mv", gen_or_cp="gen")
+                gen_mv_result_df = compare_with_fix_cos_df(edisgo_obj.timeseries.
+                                generators_active_power, timesteps_converged,
+                                gen_mv_result_df, gen_in_mv, mv_cos_phi,
+                                _get_q_sign_generator("inductive"))
 
                 # Write result
+                edisgo_obj.timeseries._generators_reactive_power.loc[
+                    timesteps_converged, gen_in_lv.index] = gen_lv_result_df
                 edisgo_obj.timeseries._generators_reactive_power.loc[
                     timesteps_converged, gen_in_mv.index] = gen_mv_result_df
 
