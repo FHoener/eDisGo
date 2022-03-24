@@ -473,10 +473,8 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                     timesteps_converged, gen_in_mv.index] = gen_mv_result_df
 
             # powerflow
-            try:
-                edisgo_obj.analyze(use_seed=True, timesteps=timesteps_converged)
-            except:
-                breakpoint()
+            edisgo_obj.analyze(use_seed=True, timesteps=timesteps_converged)
+
             # getting last q_factor for comparison
             lv_q_fac_old = lv_q_fac.copy()
             mv_q_fac_old = mv_q_fac.copy()
