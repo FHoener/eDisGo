@@ -57,6 +57,17 @@ def compare_with_fix_cos_df(active_power_df, timesteps_converged, q_u_df, to_ins
 
 # changes columns in dataframe from buses to cp or gen
 def group_q_u_per_df(buses_df, q_fac):
+    """
+            Used for grouping q_u_factor per generator or load
+            if buses_df is empty returns q_fac with zeros to prevent errors
+
+            Parameters
+            ----------
+            buses_df : df
+               Dataframe to group by
+            q_fac : df
+               Dataframe to group
+        """
     groups = buses_df.groupby("bus").groups
 
     q_fac_per_df = {}
@@ -65,7 +76,12 @@ def group_q_u_per_df(buses_df, q_fac):
         for entry in entries:
             q_fac_per_df.update({entry: q_fac.loc[:, bus]})
 
-    return pd.DataFrame.from_dict(q_fac_per_df)
+    q_fac_sorted = pd.DataFrame.from_dict(q_fac_per_df)
+
+    if len(buses_df) == 0:
+        q_fac_sorted = pd.DataFrame(0, index=q_fac.index, columns=q_fac.columns)
+
+    return q_fac_sorted
 
 # splits df in mv and lv
 def get_mv_and_lv_grid_df(bus_df, to_split_df):
@@ -419,7 +435,7 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                 cp_lv_result_df = compare_with_fix_cos_df(edisgo_obj.timeseries.
                                 charging_points_active_power.loc[timesteps_converged,
                                 cp_in_lv.index], timesteps_converged,
-                                cp_lv_result_df, cp_in_mv, lv_cos_phi,
+                                cp_lv_result_df, cp_in_lv, lv_cos_phi,
                                 _get_q_sign_load("capacitive"))
 
                 # Calculating reactive power for mv df
