@@ -44,7 +44,6 @@ def compare_with_fix_cos_df(active_power_df, timesteps_converged, q_u_df, to_ins
     # change column order to prevent later mismatching
     columnsTitles = list(fix_cos_df.columns)
     q_u_df = q_u_df.reindex(columns=columnsTitles, )
-    # TO_DO: optimieren für ind cap fälle'
     q_u_df.mask(
         ((q_u_df < 0) & (abs(q_u_df) > abs(fix_cos_df))), abs(fix_cos_df) * -1,
         inplace=True, axis=1)
@@ -333,7 +332,7 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
             :, cp_in_mv.index
             ] = edisgo_obj.timeseries.charging_points_active_power.loc[
                 :, cp_in_mv.index
-                ] * mv_cos_phi * _get_q_sign_load("capacitive")
+                ] * lv_cos_phi * _get_q_sign_load("inductive") # capacitive Q not allowed in MV, see VDE 4110
 
         # calculating reactive power for generators
         if for_gen:
@@ -342,9 +341,23 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
             :, gen_in_lv.index
             ] = edisgo_obj.timeseries.generators_active_power.loc[
                 :, gen_in_lv.index
-                ] * lv_cos_phi * _get_q_sign_generator("inductive")
+                ] * _get_q_sign_generator("inductive") # inductive so Q lowers the voltage
+
+            # cos_phi is 0.95 between 3.68 and 13.68 kVA, 0.9 above 13.68 and 1 lower tahn 3.68
+            # checks if p_nom is between 3.68 and 13.68 for cos_phi 0.95
+            edisgo_obj.timeseries._generators_reactive_power.mask(
+                ((gen_p_nom_per_timestep.loc[:, gen_in_lv.index])*1000 > 3.68)
+                & ((gen_p_nom_per_timestep.loc[:, gen_in_lv.index])*1000 <= 13.68),
+                edisgo_obj.timeseries._generators_reactive_power * lv_cos_phi,
+                inplace=True, axis=1)
+            # checks if p_nom is over 13.68 for cos_phi 0.90
+            edisgo_obj.timeseries._generators_reactive_power.mask(
+                (gen_p_nom_per_timestep.loc[:, gen_in_lv.index])*1000 > 13.68,
+                edisgo_obj.timeseries._generators_reactive_power * mv_cos_phi,
+                inplace=True, axis=1)
 
             # Calculating reactive power for mv df
+            # cos_phi is set to 0.9 without checking, cause most PV are larger than 13.68 kVA
             edisgo_obj.timeseries._generators_reactive_power.loc[
             :, gen_in_mv.index
             ] = edisgo_obj.timeseries.generators_active_power.loc[
@@ -439,15 +452,16 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                                 _get_q_sign_load("capacitive"))
 
                 # Calculating reactive power for mv df
+                # cos_phi is 0.95 cause VDE 4110 suggests it
                 cp_mv_result_df = cp_p_nom_per_timestep.loc[timesteps_converged, cp_in_mv.index] \
-                * mv_cos_phi \
+                * lv_cos_phi \
                 * mv_q_u_per_cp_df.loc[timesteps_converged, cp_in_mv.index]
 
                 # Check if reactive_power is lower than fix cos
                 cp_mv_result_df = compare_with_fix_cos_df(edisgo_obj.timeseries.
                                 charging_points_active_power.loc[timesteps_converged,
                                 cp_in_mv.index], timesteps_converged,
-                                cp_mv_result_df, cp_in_mv, mv_cos_phi,
+                                cp_mv_result_df, cp_in_mv, lv_cos_phi,
                                 _get_q_sign_load("capacitive"))
 
                 # Write result
@@ -541,13 +555,14 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                     * _get_q_sign_load("capacitive")
 
             # Calculating reactive power for mv df
+            # cos_phi is 0.95 cause VDE 4110 suggests it
             edisgo_obj.timeseries._charging_points_reactive_power.loc[
                 :, cp_in_mv.index] \
                 = edisgo_obj.timeseries.charging_points_active_power.loc[
                 :, cp_in_mv.index] \
-                * mv_cos_phi \
+                * lv_cos_phi \
                 * cp_cos_phi_p.loc[:, cp_in_mv.index] \
-                * _get_q_sign_load("capacitive")
+                * _get_q_sign_load("inductive")
 
                 # calculating reactive power for generators
         if for_gen:
@@ -570,11 +585,12 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                     * _get_q_sign_generator("inductive")
 
             # Calculating reactive power for mv df
+            # cos_phi is 0.95 cause VDE 4110 suggests it
             edisgo_obj.timeseries._generators_reactive_power.loc[
                 :, gen_in_mv.index] \
                 = edisgo_obj.timeseries.generators_active_power.loc[
                     :, gen_in_mv.index] \
-                    * mv_cos_phi \
+                    * lv_cos_phi \
                     * gen_cos_phi_p.loc[:, gen_in_mv.index] \
                     * _get_q_sign_generator("inductive")
 
