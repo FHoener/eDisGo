@@ -483,9 +483,21 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
 
                 gen_lv_result_df = gen_p_nom_per_timestep.loc[
                       timesteps_converged, gen_in_lv.index] \
-                      * lv_cos_phi \
                       * lv_q_u_per_gen_df.loc[timesteps_converged, gen_in_lv.index] \
                       * -1
+
+                # checks if p_nom is between 3.68 and 13.68 for cos_phi 0.95
+                gen_lv_result_df.mask(
+                    ((gen_p_nom_per_timestep.loc[timesteps_converged,
+                      gen_in_lv.index]) * 1000 > 3.68)
+                    & ((gen_p_nom_per_timestep.loc[timesteps_converged,
+                        gen_in_lv.index]) * 1000 <= 13.68),
+                    gen_lv_result_df * lv_cos_phi, inplace=True, axis=1)
+                # checks if p_nom is over 13.68 for cos_phi 0.90
+                gen_lv_result_df.mask(
+                    (gen_p_nom_per_timestep.loc[timesteps_converged,
+                     gen_in_lv.index]) * 1000 > 13.68,
+                    gen_lv_result_df * mv_cos_phi, inplace=True, axis=1)
 
                 # Check if reactive_power is lower than fix cos
                 gen_lv_result_df = compare_with_fix_cos_df(edisgo_obj.timeseries.
@@ -494,11 +506,10 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                                 gen_lv_result_df, gen_in_lv, lv_cos_phi,
                                 _get_q_sign_generator("inductive"))
 
-
                 # Calculating reactive power for mv df
                 gen_mv_result_df = gen_p_nom_per_timestep.loc[
                       timesteps_converged, gen_in_mv.index] \
-                      * mv_cos_phi \
+                      * lv_cos_phi \
                       * mv_q_u_per_gen_df.loc[timesteps_converged, gen_in_mv.index] \
                       * -1
 
@@ -506,7 +517,7 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                 gen_mv_result_df = compare_with_fix_cos_df(edisgo_obj.timeseries.
                                 generators_active_power.loc[timesteps_converged,
                                 gen_in_mv.index], timesteps_converged,
-                                gen_mv_result_df, gen_in_mv, mv_cos_phi,
+                                gen_mv_result_df, gen_in_mv, lv_cos_phi,
                                 _get_q_sign_generator("inductive"))
 
                 # Write result
@@ -580,9 +591,20 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                 :, gen_in_lv.index] \
                 = edisgo_obj.timeseries.generators_active_power.loc[
                     :, gen_in_lv.index] \
-                    * lv_cos_phi \
                     * gen_cos_phi_p.loc[:, gen_in_lv.index] \
                     * _get_q_sign_generator("inductive")
+
+            # checks if p_nom is between 3.68 and 13.68 for cos_phi 0.95
+            edisgo_obj.timeseries._generators_reactive_power.mask(
+                ((gen_p_nom_per_timestep.loc[:, gen_in_lv.index])*1000 > 3.68)
+                & ((gen_p_nom_per_timestep.loc[:, gen_in_lv.index])*1000 <= 13.68),
+                edisgo_obj.timeseries._generators_reactive_power * lv_cos_phi,
+                inplace=True, axis=1)
+            # checks if p_nom is over 13.68 for cos_phi 0.90
+            edisgo_obj.timeseries._generators_reactive_power.mask(
+                (gen_p_nom_per_timestep.loc[:, gen_in_lv.index])*1000 > 13.68,
+                edisgo_obj.timeseries._generators_reactive_power * mv_cos_phi,
+                inplace=True, axis=1)
 
             # Calculating reactive power for mv df
             # cos_phi is 0.95 cause VDE 4110 suggests it
