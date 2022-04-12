@@ -194,7 +194,7 @@ def cos_phi_p_curve(
 
     curve_q_set_in_percentage = np.select(
         [
-            (curve_parameter["start_upper"] > p_ac_in_percentage).fillna(False),
+            (curve_parameter["start_upper"] > p_ac_in_percentage).fillna(True),
             (curve_parameter["start_upper"] <= p_ac_in_percentage).fillna(False),
         ],
         [
