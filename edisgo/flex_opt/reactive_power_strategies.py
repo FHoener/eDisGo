@@ -279,7 +279,7 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
 
         cp_in_lv, cp_in_mv = get_mv_and_lv_grid_df(buses_for_cp, cp_buses_df)
     if for_gen:
-        # Selecting all buses with an charging point
+        # Selecting all buses with an solar or wind gen
         gen_buses_df = edisgo_obj.topology.generators_df.loc[
             edisgo_obj.topology.generators_df.type.isin(["solar", "wind"])]
         buses_for_gen = edisgo_obj.topology.buses_df
@@ -509,7 +509,7 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                 # Calculating reactive power for mv df
                 gen_mv_result_df = gen_p_nom_per_timestep.loc[
                       timesteps_converged, gen_in_mv.index] \
-                      * lv_cos_phi \
+                      * mv_cos_phi \
                       * mv_q_u_per_gen_df.loc[timesteps_converged, gen_in_mv.index] \
                       * -1
 
@@ -517,7 +517,7 @@ def reactive_power_strategies(edisgo_obj, strategy="fix_cos_phi", **kwargs):
                 gen_mv_result_df = compare_with_fix_cos_df(edisgo_obj.timeseries.
                                 generators_active_power.loc[timesteps_converged,
                                 gen_in_mv.index], timesteps_converged,
-                                gen_mv_result_df, gen_in_mv, lv_cos_phi,
+                                gen_mv_result_df, gen_in_mv, mv_cos_phi,
                                 _get_q_sign_generator("inductive"))
 
                 # Write result
